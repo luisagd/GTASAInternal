@@ -3,6 +3,8 @@
 #include "Classes.h"
 #include "main.h"
 
+import calc;
+
 //constexpr bool USE_RADIANS = true;
 #define USE_RADIANS
 
@@ -203,16 +205,6 @@ vec3 DegToRad(const vec3& degrees)
 	radians.y = degrees.y * (PI / 180);
 	radians.z = degrees.z * (PI / 180);
 	return radians;
-}
-
-float RadToDeg(float radian)
-{
-	return radian * (180 / PI);
-}
-
-float DegToRad(float degree)
-{
-	return degree * (PI / 180);
 }
 
 

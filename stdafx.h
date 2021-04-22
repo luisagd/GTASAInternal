@@ -22,7 +22,7 @@
 #include <D3dx9core.h>
 #include <d3dcommon.h>
 
-//#define FMT_HEADER_ONLY 1
+#define FMT_HEADER_ONLY 1
 #include <fmt/core.h>
 #include <fmt/format.h>
 //#include <iostream>
