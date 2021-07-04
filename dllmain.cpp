@@ -2,11 +2,16 @@
 #include "mem.h"
 #include "Classes.h"
 #include "main.h"
+#include "imgui/imgui.h"
+#include "imgui/backends/imgui_impl_dx9.h"
+#include "imgui/backends/imgui_impl_win32.h"
 
 import calc;
 
-//constexpr bool USE_RADIANS = true;
-#define USE_RADIANS
+extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+#define USE_RADIANS//constexpr bool USE_RADIANS = true;
+
 
 #pragma comment (lib, "d3d9.lib")
 #pragma comment (lib, "d3dx9.lib")
@@ -32,33 +37,32 @@ public:
 	void CleanUp() {
 		if (g_font) {
 			g_font->Release();
-			g_font = NULL;
+			g_font = nullptr;
 		}
 		if (LineL) {
 			LineL->Release();
 			LineL = nullptr;
 		}
+		ImGui_ImplDX9_Shutdown();
+		ImGui_ImplWin32_Shutdown();
+		ImGui::DestroyContext();
 		mem::Patch(d3d9Device[42], EndSceneBytes, 7);
 		mem::Patch(d3d9Device[41], BeginSceneBytes, 7);
-
+		(WNDPROC)SetWindowLongPtr(window, GWL_WNDPROC, (LONG_PTR)oWndProc);
 	}
 	void Init() {
 		//calling it with NULL also gives you the address of the .exe module
 		moduleBase = (uintptr_t)GetModuleHandle(NULL);
-		if (GetD3D9Device(d3d9Device, sizeof(d3d9Device))) {
-			memcpy(EndSceneBytes, (char*)d3d9Device[42], 7); //hook stuff using the dumped addresses
-			memcpy(BeginSceneBytes, (char*)d3d9Device[41], 7); //hook stuff using the dumped addresses
-		}
-		else throw "Failed hooking d3d9";
-
-		oEndScene = (Hack::fpEndScene)mem::TrampHook32((char*)d3d9Device[42], (char*)EndSceneHook, 7);
-		oBeginScene = (Hack::fpEndScene)mem::TrampHook32((char*)d3d9Device[41], (char*)BeginSceneHook, 7);
 
 
 		CPedPoolInfo = reinterpret_cast<struct CPedPoolInfo*>(*(struct CPedPoolInfo**)(moduleBase + 0x774490));
 
 		d3d = reinterpret_cast<IDirect3D9*>(*(IDirect3D9**)0xC97C20);
 		d3ddev = reinterpret_cast<IDirect3DDevice9*>(*(IDirect3DDevice9**)0xC97C28);
+
+		D3DDEVICE_CREATION_PARAMETERS CP;
+		d3ddev->GetCreationParameters(&CP);
+		window = CP.hFocusWindow;
 
 
 		auto hr = D3DXCreateFont(d3ddev,     //D3D Device
@@ -111,6 +115,23 @@ public:
 		RMB = (uint8_t*)0xB73405;
 
 		CPedDensity = (float*)0x8D2530;
+
+
+		if (GetD3D9Device(d3d9Device, sizeof(d3d9Device))) {
+			memcpy(EndSceneBytes, (char*)d3d9Device[42], 7); //hook stuff using the dumped addresses
+			memcpy(BeginSceneBytes, (char*)d3d9Device[41], 7); //hook stuff using the dumped addresses
+		}
+		else throw "Failed hooking d3d9";
+
+		oEndScene = (Hack::fpEndScene)mem::TrampHook32((char*)d3d9Device[42], (char*)EndSceneHook, 7);
+		oBeginScene = (Hack::fpEndScene)mem::TrampHook32((char*)d3d9Device[41], (char*)BeginSceneHook, 7);
+		oWndProc = (WNDPROC)SetWindowLongPtr(window, GWL_WNDPROC, (LONG_PTR)WndProcHook);
+
+
+		bAim = false;
+		bEsp = true;
+		bAmmo = true;
+		bWanted = true;
 	}
 	void DrawLine(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint8_t thickness, D3DCOLOR color) {
 		if (!LineL) D3DXCreateLine(d3ddev, &LineL);
@@ -121,8 +142,32 @@ public:
 		LineL->SetWidth(thickness);
 		LineL->Draw(Line, 2, color);
 	}
-	void DrawLine(vec2 src, vec2 dst, uint8_t thickness, D3DCOLOR color) {
+	void DrawLine(const vec2& src, const vec2& dst, uint8_t thickness, D3DCOLOR color) {
 		DrawLine(src.x, src.y, dst.x, dst.y, thickness, color);
+	}
+	void DrawEspBox2D(const vec2& top, const vec2& bot, int8_t thickness, D3DCOLOR color) {
+		auto height = abs(top.y-bot.y);
+		vec2 tl, tr;
+		tl.x = abs(top.x - height / 4);
+		//tl.x = top.x + height / 4;
+
+		tl.y = top.y;
+		tr.x = top.x + height / 4;
+		tr.y = top.y;
+		vec2 bl, br;
+		bl.x = abs(bot.x - height / 4);
+		bl.y = bot.y;
+		br.x = bot.x + height / 4;
+		br.y = bot.y;
+
+		DrawLine(tl, tr, thickness, color);
+		DrawLine(bl, br, thickness, color);
+		DrawLine(tl, bl, thickness, color);
+		DrawLine(tr, br, thickness, color);
+
+	}
+	void DrawEspBox2D(const D3DXVECTOR3& top, const D3DXVECTOR3& bot, int8_t thickness, D3DCOLOR color) {
+		DrawEspBox2D(vec2(top.x, top.y), vec2(bot.x, bot.y), thickness, color);
 	}
 	std::vector<CPed*> GetCPed() {
 		std::vector<CPed*> peds;
@@ -139,6 +184,7 @@ public:
 	}
 
 	LPDIRECT3DDEVICE9 d3ddev;
+	HWND window;
 	CPed* LocalPlayerPtr;
 	struct CPedPoolInfo* CPedPoolInfo ;
 	bool* IsMenuActive;
@@ -150,6 +196,9 @@ public:
 	using fpEndScene = HRESULT(_stdcall*)(IDirect3DDevice9* pDevice);
 	fpEndScene oEndScene;
 	fpEndScene oBeginScene;
+	typedef LRESULT(CALLBACK* WNDPROC)(HWND, UINT, WPARAM, LPARAM);
+	WNDPROC oWndProc;
+
 	ID3DXFont* g_font;
 	IDirect3D9* d3d;
 	void* EndSceneOld;
@@ -183,13 +232,22 @@ public:
 	std::vector<CPed*>CPedPool; 
 
 	std::atomic<bool> end;
+	std::atomic<bool> imgui_init;
+	std::atomic<bool> show_menu;
+	std::atomic<bool> bAim;
+	std::atomic<bool> bEsp;
+	std::atomic<bool> bAmmo;
+	std::atomic<bool> bWanted;
+
+
+
 };
 
 
 Hack* hack;
 
 
-vec3 RadToDeg(vec3& radians)
+inline vec3 RadToDeg(const vec3& radians)
 {
 	vec3 degrees;
 	degrees.x = radians.x * (180 / PI);
@@ -198,7 +256,7 @@ vec3 RadToDeg(vec3& radians)
 	return degrees;
 }
 
-vec3 DegToRad(const vec3& degrees)
+inline vec3 DegToRad(const vec3& degrees)
 {
 	vec3 radians;
 	radians.x = degrees.x * (PI / 180);
@@ -213,7 +271,7 @@ inline float Magnitude(vec3 vec)
 	return sqrtf(vec.x * vec.x + vec.y * vec.y + vec.z * vec.z);
 }
 
-inline float Distance(vec3 src, vec3 dst)
+inline float Distance(const vec3& src, const vec3& dst)
 {
 	vec3 diff = src - dst;
 	return sqrtf(diff.x * diff.x + diff.y * diff.y + diff.z * diff.z); //Magnitude
@@ -286,10 +344,10 @@ bool WorldToScreen(LPDIRECT3DDEVICE9 pDevice, D3DXVECTOR3* pos, D3DXVECTOR3* out
 #define YAW 1  //x
 #define PITCH 0 //y
 #define ROLL 2 //z
-const float PITCH_MAX_DOWN = -90;
-const float PITCH_MAX_UP = 90;
-const float YAW_MAX_LEFT = 180;
-const float YAW_MAX_RIGHT = -180;
+constexpr float PITCH_MAX_DOWN = -90;
+constexpr float PITCH_MAX_UP = 90;
+constexpr float YAW_MAX_LEFT = 180;
+constexpr float YAW_MAX_RIGHT = -180;
 
 #ifdef USE_RADIANS
 #define ClampAngle ClampAngleR
@@ -308,25 +366,25 @@ inline vec3 ClampAngleR(const vec3& angle) {
 	ClampedAngle.v[ROLL] = 0.0f;
 	return ClampedAngle;
 }
-inline vec3 CalcAngleR(vec3 src, vec3 dst)
+inline vec3 CalcAngleR(const vec3& src, const vec3& dst)
 {
 
-	vec3 delta = dst - src;
+	const vec3 delta = dst - src;
 
-	float opposite = delta.y;
-	float adjacent = delta.x;
+	const float opposite = delta.y;
+	const float adjacent = delta.x;
 
 	vec3 angles;
 	angles.v[YAW] = atan2(-opposite, -adjacent);
 	angles.v[YAW] += 0.0389;
 
-	float adj = delta.x;
-	float opp = delta.z;
+	const float adj = delta.x;
+	const float opp = delta.z;
 
-	float hyp = sqrtf((delta.z * delta.z) + (delta.x * delta.x) + (delta.y * delta.y));
+	const float hyp = sqrtf((delta.z * delta.z) + (delta.x * delta.x) + (delta.y * delta.y));
 
 	angles.v[PITCH] = asinf(opp / hyp);
-	angles.v[PITCH] -= 0.079;
+	angles.v[PITCH] -= 0.079; //Depends of Resolution/Windows size !?
 
 
 	angles.v[ROLL] = 0.0f;
@@ -465,8 +523,14 @@ bool IsLineOfSightClear(const CVector* vecStart, const CVector* vecEnd, bool bCh
 	return bReturn;
 }
 
-inline bool IsValidCPed(CPed* ped) {
+inline bool IsValidCPed(CPed* ped) noexcept{
 	return (ped && ped->pViewMatrix && ped->pViewMatrix->w1 != 0.0f && ped->Health > 0);
+}
+
+inline bool IsGameReady() {
+	if (!(*(bool*)0xBA67A4) && (*(CPed**)(0xB6F5F0)) &&(*(CPed**)(0xB6F5F0))->Health != 0)
+		return true;
+	else return false;
 }
 
 CPed* GetBestTarget(struct CPedPoolInfo* CPedPoolInfo, const vec3& src, const vec3& angles) {
@@ -485,7 +549,7 @@ CPed* GetBestTarget(struct CPedPoolInfo* CPedPoolInfo, const vec3& src, const ve
 			found++;
 			vec3 dst(ped->pViewMatrix->w1, ped->pViewMatrix->w2, ped->pViewMatrix->w3);
 			vec3 angleTo = CalcAngle(src, dst);
-			newCoefficient = Distance(angles, angleTo)* 0.5 + Distance(src, dst) * 0.5;
+			newCoefficient = Distance(angles, angleTo)* 0.2 + Distance(src, dst) * 0.8;
 			if (newCoefficient < oldCoefficient)
 			{
 				oldCoefficient = newCoefficient;
@@ -493,33 +557,107 @@ CPed* GetBestTarget(struct CPedPoolInfo* CPedPoolInfo, const vec3& src, const ve
 			}
 		}
 	}
-	fmt::print("Current CPeds: {}, Found: {}\n", CPedPoolInfo->CurrentCPedNum, found);
+	//fmt::print("Current CPeds: {}, Found: {}\n", CPedPoolInfo->CurrentCPedNum, found);
 
 	return BestTarget;
 }
 
+void InitImGui(IDirect3DDevice9* pDevice) {
+	IMGUI_CHECKVERSION();
+	ImGui::CreateContext();
+	ImGuiIO& io = ImGui::GetIO(); (void)io;
+	io.IniFilename = NULL;
+	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+	ImGui::StyleColorsDark();
+
+	io.Fonts->AddFontDefault();
+
+	ImGui_ImplWin32_Init(hack->window);
+	ImGui_ImplDX9_Init(pDevice);
+	hack->imgui_init = true;
+	return;
+}
+
 HRESULT _stdcall EndSceneHook(IDirect3DDevice9 *pDevice) { //7 bytes befor calling
 	if (hack->end)return hack->oEndScene(pDevice);
+
 	//continuous writes / freeze
-	*hack->pWantedLevel = 0;
-	*hack->pWantedLevelPoints = 0;
 	*hack->CPedDensity = 100;
 	*hack->pRecoil = 0.0f;
 	hack->LocalPlayerPtr->Health = 10000;
-	//hack->LocalPlayerPtr->WeaponSlot[0].AmmoInClip = 15;
-	//fmt::print("LocalPlayerPtrYaw: {}\n", hack->LocalPlayerPtr->Yaw);
-	for (auto& slot : hack->LocalPlayerPtr->WeaponSlot) {
-		if (slot.Type > 10) {
-			slot.AmmoRemaining = 999;
-			slot.AmmoInClip = 100;
+
+	if (!hack->imgui_init) InitImGui(pDevice);
+	else if(hack->show_menu){
+
+		ImGui_ImplDX9_NewFrame();
+		ImGui_ImplWin32_NewFrame();
+		ImGui::NewFrame();
+
+
+
+		ImGui::Text("Hello, world!");
+		if (ImGui::Button("Enable/Disable Aimbot (Unstable)")) {
+			hack->bAim = !hack->bAim;
+		}
+		if (ImGui::Button("Enable/Disable ESP")) {
+			hack->bEsp = !hack->bEsp;
+		}
+		if (ImGui::Button("Enable/Disable Infinite Ammo")) {
+			hack->bAmmo = !hack->bAmmo;
+		}
+		if (ImGui::Button("Enable/Disable Never Wanted")) {
+			hack->bWanted = !hack->bWanted;
+		}
+		ImGui::EndFrame();
+		ImGui::Render();
+		ImGui_ImplDX9_RenderDrawData(ImGui::GetDrawData());
+	}
+	ImGui::GetIO().MouseDrawCursor = hack->show_menu;
+
+	if (!IsGameReady())			return hack->oEndScene(pDevice);
+
+	if(hack->bWanted){
+		*hack->pWantedLevel = 0;
+		*hack->pWantedLevelPoints = 0;
+	}
+	if (hack->bAmmo) {
+		//Handguns
+		if (hack->LocalPlayerPtr->WeaponSlot[2].Type != 0) {
+			hack->LocalPlayerPtr->WeaponSlot[2].AmmoRemaining = 999;
+			hack->LocalPlayerPtr->WeaponSlot[2].AmmoInClip = 100;
+		}
+		//Shotguns
+		if (hack->LocalPlayerPtr->WeaponSlot[3].Type != 0) {
+			hack->LocalPlayerPtr->WeaponSlot[3].AmmoRemaining = 999;
+			hack->LocalPlayerPtr->WeaponSlot[3].AmmoInClip = 100;
+		}
+		//Sub-Machineguns
+		if (hack->LocalPlayerPtr->WeaponSlot[4].Type != 0) {
+			hack->LocalPlayerPtr->WeaponSlot[4].AmmoRemaining = 999;
+			hack->LocalPlayerPtr->WeaponSlot[4].AmmoInClip = 100;
+		}
+		//Machineguns
+		if (hack->LocalPlayerPtr->WeaponSlot[5].Type != 0) {
+			hack->LocalPlayerPtr->WeaponSlot[5].AmmoRemaining = 999;
+			hack->LocalPlayerPtr->WeaponSlot[5].AmmoInClip = 100;
+		}
+		//Rifles
+		if (hack->LocalPlayerPtr->WeaponSlot[6].Type != 0) {
+			hack->LocalPlayerPtr->WeaponSlot[6].AmmoRemaining = 999;
+			hack->LocalPlayerPtr->WeaponSlot[6].AmmoInClip = 100;
+		}
+		//Heavy Weapons
+		if (hack->LocalPlayerPtr->WeaponSlot[7].Type != 0) {
+			hack->LocalPlayerPtr->WeaponSlot[7].AmmoRemaining = 999;
+			hack->LocalPlayerPtr->WeaponSlot[7].AmmoInClip = 100;
+		}
+		//Projectiles
+		if (hack->LocalPlayerPtr->WeaponSlot[8].Type != 0) {
+			hack->LocalPlayerPtr->WeaponSlot[8].AmmoRemaining = 20;
+			hack->LocalPlayerPtr->WeaponSlot[8].AmmoInClip = 5;
 		}
 	}
-
-	if (*hack->IsMenuActive) {
-		return hack->oEndScene(pDevice);
-	}
-
-	if (*hack->RMB == 128 && IsValidCPed(hack->BestTarget))
+	if (hack->bAim && *hack->RMB == 128 && IsValidCPed(hack->BestTarget))
 	{
 		vec3 src(*hack->pCameraX, *hack->pCameraY, *hack->pCameraZ);
 
@@ -527,57 +665,63 @@ HRESULT _stdcall EndSceneHook(IDirect3DDevice9 *pDevice) { //7 bytes befor calli
 
 		auto  angle = CalcAngle(src, dst);
 
-		if (angle.v[YAW] < -PI || angle.v[YAW] > PI) {
-			fmt::print("Yaw wrong man wtf:\n"
-				"Yaw: {} Pitch: {}\n"
-				"src: {} dst: {}\n"
-				"CalcAngle: {}", angle.v[YAW], angle.v[PITCH], src, dst, CalcAngle(src, dst));
-		}
-		if (angle.v[PITCH] < -(PI / 2) || angle.v[PITCH] > (PI / 2)) {
-			fmt::print("Pitch wrong man wtf:\n"
-				"Yaw: {} Pitch: {}\n"
-				"src: {} dst: {}\n"
-				"CalcAngle: {}", angle.v[YAW], angle.v[PITCH], src, dst, CalcAngle(src, dst));
-		}
 		*hack->pPitch = (angle.v[PITCH]);
 		*hack->pYaw = (angle.v[YAW]);
 
 		hack->LocalPlayerPtr->Yaw = (angle.v[YAW]);
 	}
+	if (hack->bEsp) {
+		auto fps_str = fmt::format("hello");
+		auto fps_string = fps_str.c_str();
+		RECT font_rect;
 
-	auto fps_str = fmt::format("hello");
-	auto fps_string = fps_str.c_str();
-	RECT font_rect;
+		//A pre-formatted string showing the current frames per second
 
-	//A pre-formatted string showing the current frames per second
+		SetRect(&font_rect, 0, 0, 100, 100);
 
-	SetRect(&font_rect, 0, 0, 100, 100);
+		const auto font_height = hack->g_font->DrawTextA(NULL,     //pSprite
+			fps_string,  //pString
+			-1,          //Count
+			&font_rect,  //pRect
+			DT_LEFT | DT_NOCLIP,//Format,
+			0xFFFFFFFF); //Color
+		for (CPed* ped : hack->GetCPed()) {
+			if (IsValidCPed(ped))
+			{
+				auto GetColor = [](float Health, float MaxHealth) -> uint8_t{
+					auto color = 255 * (Health / MaxHealth);
+					if (color > 255 || color < 0)
+						return 0;
+					else return abs(255 - color);
+				};
+				D3DXVECTOR3 EntPos2D, EntHead2D;
+				D3DXVECTOR3 EntPos3D(ped->pViewMatrix->w1, ped->pViewMatrix->w2, ped->pViewMatrix->w3);
+				D3DXVECTOR3 EntHead3D = GetBonePosition(ped, BONE_HEAD1, false);
 
-	auto font_height = hack->g_font->DrawTextA(NULL,     //pSprite
-		fps_string,  //pString
-		-1,          //Count
-		&font_rect,  //pRect
-		DT_LEFT | DT_NOCLIP,//Format,
-		0xFFFFFFFF); //Color
+				auto color = D3DCOLOR_ARGB(255, GetColor(ped->Health, ped->MaxHealth), abs(255- GetColor(ped->Health, ped->MaxHealth)), 0);
+				if (WorldToScreen(hack->d3ddev, &EntPos3D, &EntPos2D)) {
+					//hack->DrawLine(EntPos2D.x, EntPos2D.y, (*hack->pWidth) / 2, (*hack->pHeight) / 2, 2, D3DCOLOR_ARGB(255, 255, 0, 0));
+					
+					WorldToScreen(hack->d3ddev, &EntHead3D, &EntHead2D);
+					if(EntHead2D.y>0 && EntPos2D.x > 1 && EntHead2D.x < *hack->pWidth - 5)
 
-	for (auto ped : hack->GetCPed()) {
-		if ( IsValidCPed(ped))
-		{
-			D3DXVECTOR3 out;
-			D3DXVECTOR3 pedXYZ(GetBonePosition(hack->BestTarget, BONE_HEAD1, false));
-			if (WorldToScreen(hack->d3ddev, &pedXYZ, &out)) {
-				hack->DrawLine(out.x, out.y, (*hack->pWidth)/2, (*hack->pHeight)/2, 2, D3DCOLOR_ARGB(255, 255, 0, 0));
+					hack->DrawEspBox2D( vec2(EntHead2D.x, EntHead2D.y), vec2(EntPos2D.x, EntPos2D.y), 2, color);
+
+				}
 			}
 		}
+		//D3DXVECTOR3 out;
+		//D3DXVECTOR3 pedXYZ(GetBonePosition(hack->BestTarget, BONE_HEAD1, false));
+		//if (WorldToScreen(hack->d3ddev, &pedXYZ, &out) || true) {
+		//	hack->DrawLine(out.x, out.y, (*hack->pWidth) / 2, 0, 2, D3DCOLOR_ARGB(255, 0, 255, 0));
+		//}
 	}
-	vec3 angles(*hack->pYaw, *hack->pPitch, 0.0f);
-	vec3 src(*hack->pCameraX, *hack->pCameraY, *hack->pCameraZ);
-	if(!IsValidCPed(hack->BestTarget))
+
+	//Update BestTarget only if is invalid or if is the player
+	if (!IsValidCPed(hack->BestTarget) || hack->BestTarget == hack->LocalPlayerPtr) {
+		vec3 angles(*hack->pYaw, *hack->pPitch, 0.0f);
+		vec3 src(*hack->pCameraX, *hack->pCameraY, *hack->pCameraZ);
 		hack->BestTarget = GetBestTarget(hack->CPedPoolInfo, src, angles);
-	D3DXVECTOR3 out;
-	D3DXVECTOR3 pedXYZ(GetBonePosition(hack->BestTarget, BONE_HEAD1, false));
-	if (WorldToScreen(hack->d3ddev, &pedXYZ, &out)|| true) {
-		hack->DrawLine(out.x, out.y, (*hack->pWidth)/2, 0, 2, D3DCOLOR_ARGB(255, 0, 255, 0));
 	}
 
 	return hack->oEndScene(pDevice);
@@ -585,31 +729,23 @@ HRESULT _stdcall EndSceneHook(IDirect3DDevice9 *pDevice) { //7 bytes befor calli
 
 HRESULT _stdcall BeginSceneHook(IDirect3DDevice9* pDevice) {
 	if (hack->end)return hack->oBeginScene(pDevice);
-	if (*hack->RMB == 128 && IsValidCPed(hack->BestTarget))
-	{
-		vec3 src(*hack->pCameraX, *hack->pCameraY, *hack->pCameraZ);
 
-		vec3 dst = GetBonePosition(hack->BestTarget, BONE_HEAD1, false);
-
-		auto  angle = CalcAngle(src, dst);
-
-		if (angle.v[YAW] < -PI || angle.v[YAW] > PI) {
-			fmt::print("Yaw wrong man wtf:\n"
-				"Yaw: {} Pitch: {}\n"
-				"src: {} dst: {}\n"
-				"CalcAngle: {}", angle.v[YAW], angle.v[PITCH], src, dst, CalcAngle(src, dst));
-		}
-		if (angle.v[PITCH] < -(PI / 2) || angle.v[PITCH] > (PI / 2)) {
-			fmt::print("Pitch wrong man wtf:\n"
-				"Yaw: {} Pitch: {}\n"
-				"src: {} dst: {}\n"
-				"CalcAngle: {}", angle.v[YAW], angle.v[PITCH], src, dst, CalcAngle(src, dst));
-		}
-		*hack->pPitch = (angle.v[PITCH]);
-		*hack->pYaw = (angle.v[YAW]);
-	}
 	return hack->oBeginScene(pDevice);
 };
+
+LRESULT __stdcall WndProcHook(const HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+
+	if(hack->end)
+		return CallWindowProc(hack->oWndProc, hWnd, uMsg, wParam, lParam);
+	if (hack->show_menu) {
+		if (ImGui_ImplWin32_WndProcHandler(hWnd, uMsg, wParam, lParam))
+			return true;
+		else return true;
+	}
+	else
+		return CallWindowProc(hack->oWndProc, hWnd, uMsg, wParam, lParam);
+}
+
 
 //Copy & Paste Section
 
@@ -689,27 +825,25 @@ DWORD WINAPI HackThread(HMODULE hModule){
 
 
 	//Create Console
-	AllocConsole();
-	FILE* f;
-	freopen_s(&f, "CONOUT$", "w", stdout);
-
-
+	//AllocConsole();
+	//FILE* f;
+	//freopen_s(&f, "CONOUT$", "w", stdout);
+	while (!IsGameReady()) {
+		Sleep(10);
+	}
+	Sleep(1000);
 	hack = new Hack;
-	fmt::print("OG for a fee, stay sippin' fam\n");
+	//fmt::print("OG for a fee, stay sippin' fam\n");
 
 	hack->Init();
 	*hack->pMoney = 10000000;
-	fmt::print("Current Width/Height: {} {}\n", *hack->pWidth, *hack->pHeight);
 	bool bHealth = false, bAim = false, bRecoil = false;
 		
 	while (1)
 	{
 		if (GetAsyncKeyState(VK_END) & 1)       break;
 
-		//if (GetAsyncKeyState(VK_NUMPAD1) & 1)   bHealth = !bHealth;
-
-		//if (*pTarget != 0)  LeftClick();
-		
+		if (GetAsyncKeyState(VK_NUMPAD1) & 1)   hack->show_menu = !hack->show_menu;
 
 		//Sleep(0);
 	}
@@ -718,8 +852,8 @@ DWORD WINAPI HackThread(HMODULE hModule){
 	Sleep(15); // for now, we wait the program to be unhooked
 	hack->CleanUp();
 	delete hack;
-	fclose(f);
-	FreeConsole();
+	//fclose(f);
+	//FreeConsole();
 	FreeLibraryAndExitThread(hModule, 0);
 	return 0;
 }
@@ -733,6 +867,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call,LPVOID lpReserv
 	case DLL_THREAD_ATTACH:
 	case DLL_THREAD_DETACH:
 	case DLL_PROCESS_DETACH:
+	default:
 		break;
 	}
 	return TRUE;

@@ -1,21 +1,19 @@
-#pragma once
+export module vec;
+#include "stdafx.h"
+import classes;
+//#include "Classes.h"
 
-#include "Classes.h"
-#include "mem.h"
-
-#ifndef MAIN_H
-#define MAIN_H
 
 template<typename T>
-inline T*  ptr_add(T* cped, uint32_t n) noexcept {
+T* ptr_add(T* cped, uint32_t n) {
 	char* ptr = (char*)cped;
 	ptr += n;
 	return (T*)ptr;
 };
 
-struct vec3
+export struct vec3
 {
-	constexpr vec3():x(0.0f), y(0.0f), z(0.0f) {};
+	constexpr vec3() :x(0.0f), y(0.0f), z(0.0f) {};
 	constexpr vec3(float _x, float _y, float _z) :x(_x), y(_y), z(_z) {};
 	union
 	{
@@ -36,7 +34,7 @@ struct vec3
 	vec3& operator *= (const float& rhs) { return *this = *this * rhs; }
 	vec3& operator /= (const float& rhs) { return *this = *this / rhs; }
 	operator D3DXVECTOR3() {
-		return D3DXVECTOR3(x,y,z);
+		return D3DXVECTOR3(x, y, z);
 	}
 	operator CVector() {
 		return CVector(x, y, z);
@@ -48,20 +46,7 @@ struct vec3
 
 };
 
-//std::ostream& operator<<(std::ostream& os, vec3 const& m);
-vec3 RadToDeg(const vec3& radians);
-
-vec3 DegToRad(const vec3& degrees);
-
-float RadToDeg(float radian);
-
-float DegToRad(float degree);
-
-float Magnitude(const vec3& vec);
-
-float Distance(const vec3& src, const vec3& dst);
-
-struct vec2
+export struct vec2
 {
 	constexpr vec2() :x(0.0f), y(0.0f) {};
 	constexpr vec2(float _x, float _y) :x(_x), y(_y) {};
@@ -81,12 +66,35 @@ struct vec2
 	vec2& operator /= (const float& rhs) { return *this = *this / rhs; }
 };
 
-bool GetD3D9Device(void** pTable, size_t Size);
-HRESULT _stdcall EndSceneHook(IDirect3DDevice9* pDevice);
-HRESULT _stdcall BeginSceneHook(IDirect3DDevice9* pDevice);
-LRESULT __stdcall WndProcHook(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+export inline vec3 RadToDeg(const vec3& radians)
+{
+	vec3 degrees;
+	degrees.x = radians.x * (180 / PI);
+	degrees.y = radians.y * (180 / PI);
+	degrees.z = radians.z * (180 / PI);
+	return degrees;
+}
 
-CPed* GetBestTarget(struct CPedPoolInfo* CPedPoolInfo, const vec3& src, const vec3& angles);
-inline bool IsValidCPed(CPed* ped) noexcept;
+export inline vec3 DegToRad(const vec3& degrees)
+{
+	vec3 radians;
+	radians.x = degrees.x * (PI / 180);
+	radians.y = degrees.y * (PI / 180);
+	radians.z = degrees.z * (PI / 180);
+	return radians;
+}
 
-#endif
+export inline bool IsValidCPed(CPed* ped) {
+	return (ped && ped->pViewMatrix && ped->pViewMatrix->w1 != 0.0f && ped->Health > 0);
+}
+
+export vec3 GetBonePosition(CPed* ped, unsigned int boneId, bool updateSkinBones)
+{
+	RwV3d outPosition;
+	if (IsValidCPed(ped)) {
+		((void(__thiscall*)(CPed*, RwV3d&, unsigned int, bool))0x5E4280)(ped, outPosition, boneId, updateSkinBones);
+		return vec3(outPosition.x, outPosition.y, outPosition.z);
+	}
+	else
+		return vec3(0, 0, 0);
+}

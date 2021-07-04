@@ -1,19 +1,19 @@
 #include "stdafx.h"
 #include "mem.h"
 
-void mem::Patch(uint8_t* dst, uint8_t* src, uint32_t size) {
+void mem::Patch(uint8_t* dst, uint8_t* src, uint32_t size) noexcept{
 	DWORD oldprotect;
 	VirtualProtect(dst, size, PAGE_EXECUTE_READWRITE, &oldprotect);
 	memcpy(dst, src, size);
 	VirtualProtect(dst, size, oldprotect, &oldprotect);
 }
-void mem::Patch(void* dst, void* src, uint32_t size) {
+void mem::Patch(void* dst, void* src, uint32_t size) noexcept{
 	DWORD oldprotect;
 	VirtualProtect(dst, size, PAGE_EXECUTE_READWRITE, &oldprotect);
 	memcpy(dst, src, size);
 	VirtualProtect(dst, size, oldprotect, &oldprotect);
 }
-void mem::Nop(uint8_t* dst, uint32_t size) {
+void mem::Nop(uint8_t* dst, uint32_t size) noexcept {
 	DWORD oldprotect;
 	VirtualProtect(dst, size, PAGE_EXECUTE_READWRITE, &oldprotect);
 	memset(dst, 0x90, size);

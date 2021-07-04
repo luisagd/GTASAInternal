@@ -20,6 +20,19 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Classes.h" />
+    <ClInclude Include="External\fmt\args.h" />
+    <ClInclude Include="External\fmt\chrono.h" />
+    <ClInclude Include="External\fmt\color.h" />
+    <ClInclude Include="External\fmt\compile.h" />
+    <ClInclude Include="External\fmt\core.h" />
+    <ClInclude Include="External\fmt\format-inl.h" />
+    <ClInclude Include="External\fmt\format.h" />
+    <ClInclude Include="External\fmt\locale.h" />
+    <ClInclude Include="External\fmt\os.h" />
+    <ClInclude Include="External\fmt\ostream.h" />
+    <ClInclude Include="External\fmt\printf.h" />
+    <ClInclude Include="External\fmt\ranges.h" />
+    <ClInclude Include="External\fmt\xchar.h" />
     <ClInclude Include="External\freetype\config\ftconfig.h" />
     <ClInclude Include="External\freetype\config\ftheader.h" />
     <ClInclude Include="External\freetype\config\ftmodule.h" />
@@ -163,11 +176,15 @@
     <LinkIncremental>true</LinkIncremental>
     <IncludePath>$(DXSDK_DIR)Include;$(SolutionDir)External;$(SolutionDir)imgui;$(IncludePath)</IncludePath>
     <LibraryPath>$(DXSDK_DIR)Lib\x86;$(LibraryPath)</LibraryPath>
+    <CodeAnalysisRuleSet>..\..\dll\GtaSaHack\GtaVHack\MyRuleSet.ruleset</CodeAnalysisRuleSet>
+    <RunCodeAnalysis>false</RunCodeAnalysis>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <IncludePath>$(DXSDK_DIR)Include;$(SolutionDir)External;$(SolutionDir)imgui;$(IncludePath)</IncludePath>
     <LibraryPath>$(DXSDK_DIR)Lib\x86;$(LibraryPath)</LibraryPath>
+    <CodeAnalysisRuleSet>..\..\dll\GtaSaHack\GtaVHack\MyRuleSet.ruleset</CodeAnalysisRuleSet>
+    <RunCodeAnalysis>false</RunCodeAnalysis>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
